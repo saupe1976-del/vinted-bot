@@ -202,7 +202,6 @@ async def on_ready():
     except Exception as e:
         print(f"❌ Startup error: {e}", flush=True)
 
-    # ✅ FIX: must call the coroutine with ()
     asyncio.create_task(scan_loop())
 
 # ================= SLASH COMMANDS =================
