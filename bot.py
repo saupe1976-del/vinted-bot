@@ -173,8 +173,23 @@ def fetch_items(query: str, price_to: int, ignore_seen: bool = False, apply_filt
                 print(f"  -> FILTERED OUT by looks_like_clothes()", flush=True)
             continue
 
-        price_tag = item.select_one("span[data-testid='price']")
+        # Try multiple price selectors (Vinted changes these frequently)
+        price_tag = (
+            item.select_one("span[data-testid='price']") or
+            item.select_one(".web_ui__Text__text.web_ui__Text__subtitle") or
+            item.select_one("h3[class*='Text']") or
+            item.select_one("span[class*='price']") or
+            item.select_one("div[class*='price']")
+        )
         price_text = price_tag.get_text(strip=True) if price_tag else ""
+        
+        # Also try to find price in the item's text content as fallback
+        if not price_text:
+            all_text = item.get_text()
+            price_match = re.search(r'£\s*(\d+(?:\.\d{2})?)', all_text)
+            if price_match:
+                price_text = f"£{price_match.group(1)}"
+        
         price_num = parse_price_gbp(price_text)
         
         if debug_count <= 3:
