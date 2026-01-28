@@ -24,6 +24,7 @@ KEYWORDS = [
     "mystery bundle",
     "reseller bundle"
 ]
+]
 
 MAX_PRICE = 50
 SCAN_INTERVAL = 30  # 10 minutes
@@ -144,6 +145,7 @@ async def on_ready():
 
 if __name__ == "__main__":
     client.run(DISCORD_TOKEN)
+
 
 
 
