@@ -18,7 +18,7 @@ KEYWORDS = [
 ]
 
 MAX_PRICE = 50
-SCAN_INTERVAL = 600  # 10 minutes
+SCAN_INTERVAL = 30  # 10 minutes
 
 BASE_URL = "https://www.vinted.co.uk/catalog"
 
@@ -136,5 +136,6 @@ async def on_ready():
 
 if __name__ == "__main__":
     client.run(DISCORD_TOKEN)
+
 
 
