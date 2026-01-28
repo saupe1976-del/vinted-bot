@@ -33,7 +33,9 @@ SCAN_INTERVAL = 300  # seconds (change anytime via /set_interval)
 
 BASE_URL = "https://www.vinted.co.uk/catalog"
 BASE_SITE = "https://www.vinted.co.uk"
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+HEADERS = {
+    "User-Agent": "Mozilla/5.0"
+}
 
 paused = False
 seen_items = set()
@@ -50,15 +52,13 @@ CLOTHING_TERMS = [
     "leggings", "dress", "skirt",
     "coat", "jacket", "shirt", "shirts", "blouse",
     "tracksuit", "joggers",
-    # sizing signals (very common in titles)
+    # sizing signals
     "size", "uk", "xs", "s", "m", "l", "xl", "xxl",
     "uk 4", "uk 6", "uk 8", "uk 10", "uk 12", "uk 14", "uk 16", "uk 18", "uk 20",
 ]
 
 BANNED_TERMS = [
-    # kids/baby
     "kids", "kid", "girls", "boys", "baby", "toddler",
-    # common non-clothing bundles
     "toy", "toys", "lego",
     "game", "games", "ps4", "ps5", "xbox", "switch", "nintendo",
     "book", "books", "dvd", "blu-ray", "cd",
@@ -83,14 +83,18 @@ def build_search_url(query: str, price_to: int) -> str:
     q = (query or "").strip()
     return f"{BASE_URL}?search_text={q.replace(' ', '+')}&price_to={price_to}&order=newest_first"
 
-def fetch_items(query: str, price_to: int, ignore_seen: bool = False):
+def fetch_items(query: str, price_to: int, ignore_seen: bool = False, apply_filter: bool = True):
+    """
+    Returns (items, meta)
+    meta includes: url, status, page_items, passed, error
+    """
     url = build_search_url(query, price_to)
 
     try:
         r = requests.get(url, headers=HEADERS, timeout=15)
     except Exception as e:
         print(f"❌ Request failed for '{query}': {e}", flush=True)
-        return []
+        return [], {"url": url, "status": None, "page_items": 0, "passed": 0, "error": str(e)}
 
     soup = BeautifulSoup(r.text, "html.parser")
 
@@ -99,9 +103,9 @@ def fetch_items(query: str, price_to: int, ignore_seen: bool = False):
     if not items:
         items = soup.select('[data-testid="feed-item"]')
 
-    print(f"🌐 {query} -> status {r.status_code}, items: {len(items)}", flush=True)
-
     results = []
+    passed = 0
+
     for item in items:
         link_tag = item.find("a", href=True)
         if not link_tag:
@@ -119,7 +123,8 @@ def fetch_items(query: str, price_to: int, ignore_seen: bool = False):
             continue
 
         title = item.get("title") or link_tag.get_text(strip=True) or "New Listing"
-        if not looks_like_clothes(title):
+
+        if apply_filter and (not looks_like_clothes(title)):
             continue
 
         price_tag = item.select_one("span[data-testid='price']")
@@ -137,11 +142,15 @@ def fetch_items(query: str, price_to: int, ignore_seen: bool = False):
             "link": link,
             "image": image
         })
+        passed += 1
 
         if not ignore_seen:
             seen_items.add(link)
 
-    return results
+    meta = {"url": url, "status": r.status_code, "page_items": len(items), "passed": passed, "error": None}
+    print(f"🌐 {query} -> status {r.status_code}, page_items {len(items)}, passed {passed}", flush=True)
+
+    return results, meta
 
 # ================= DISCORD =================
 
@@ -180,7 +189,7 @@ async def scan_loop():
             continue
 
         for query in list(KEYWORDS):
-            items = await asyncio.to_thread(fetch_items, query, MAX_PRICE, False)
+            items, _meta = await asyncio.to_thread(fetch_items, query, MAX_PRICE, False, True)
             print(f"🔎 {query}: new items {len(items)}", flush=True)
             if items:
                 await post_items(channel, query, items, limit=8)
@@ -202,7 +211,7 @@ async def on_ready():
             print("✅ Slash commands synced globally (may take time to appear)", flush=True)
 
         channel = await get_post_channel()
-        await channel.send("✅ Vinted bot live (no profit filter). Use /search_now.")
+        await channel.send("✅ Vinted bot live. Use /search_now (diagnostic enabled).")
     except Exception as e:
         print(f"❌ Startup error: {e}", flush=True)
 
@@ -286,8 +295,8 @@ async def reset_seen_cmd(interaction: discord.Interaction):
     seen_items.clear()
     await interaction.response.send_message("✅ Cleared seen items.", ephemeral=True)
 
-@tree.command(name="search_now", description="Run a one-off search now and post results (ignores seen items).")
-async def search_now_cmd(interaction: discord.Interaction, keyword: str, max_price: int = 20):
+@tree.command(name="search_now", description="Run a one-off search now and post results (diagnostic).")
+async def search_now_cmd(interaction: discord.Interaction, keyword: str, max_price: int = 20, bypass_filter: bool = False):
     await interaction.response.defer(ephemeral=True)
 
     kw = keyword.strip()
@@ -297,15 +306,27 @@ async def search_now_cmd(interaction: discord.Interaction, keyword: str, max_pri
     if max_price < 1 or max_price > 500:
         return await interaction.followup.send("max_price must be between 1 and 500.", ephemeral=True)
 
-    # ignore_seen=True so manual searches always show results
-    items = await asyncio.to_thread(fetch_items, kw, max_price, True)
+    items, meta = await asyncio.to_thread(fetch_items, kw, max_price, True, not bypass_filter)
     channel = await get_post_channel()
 
+    diag = (
+        f"Status: {meta['status']}\n"
+        f"Page items: {meta['page_items']}\n"
+        f"Passed filter: {meta['passed']}\n"
+        f"Bypass filter: {bypass_filter}\n"
+    )
+
     if not items:
-        return await interaction.followup.send(f"No results for `{kw}` up to £{max_price}.", ephemeral=True)
+        return await interaction.followup.send(
+            f"No results for `{kw}` up to £{max_price}.\n\n{diag}",
+            ephemeral=True
+        )
 
     sent = await post_items(channel, kw, items, limit=8)
-    await interaction.followup.send(f"✅ Posted {sent} result(s) for `{kw}` (≤ £{max_price}).", ephemeral=True)
+    await interaction.followup.send(
+        f"✅ Posted {sent} result(s) for `{kw}` (≤ £{max_price}).\n\n{diag}",
+        ephemeral=True
+    )
 
 # =================================================
 
