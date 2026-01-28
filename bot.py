@@ -69,11 +69,8 @@ BANNED_TERMS = [
 
 def looks_like_clothes(title: str) -> bool:
     t = (title or "").lower()
-
     if any(bad in t for bad in BANNED_TERMS):
         return False
-
-    # must contain at least one clothing/sizing signal
     return any(word in t for word in CLOTHING_TERMS)
 
 def parse_price_gbp(text: str) -> float | None:
@@ -83,11 +80,10 @@ def parse_price_gbp(text: str) -> float | None:
     return float(m.group(1)) if m else None
 
 def build_search_url(query: str, price_to: int) -> str:
-    # Always newest first
     q = (query or "").strip()
     return f"{BASE_URL}?search_text={q.replace(' ', '+')}&price_to={price_to}&order=newest_first"
 
-def fetch_items(query: str, price_to: int):
+def fetch_items(query: str, price_to: int, ignore_seen: bool = False):
     url = build_search_url(query, price_to)
 
     try:
@@ -97,7 +93,12 @@ def fetch_items(query: str, price_to: int):
         return []
 
     soup = BeautifulSoup(r.text, "html.parser")
+
+    # primary + fallback selector (Vinted markup can change)
     items = soup.select("div.feed-grid__item")
+    if not items:
+        items = soup.select('[data-testid="feed-item"]')
+
     print(f"🌐 {query} -> status {r.status_code}, items: {len(items)}", flush=True)
 
     results = []
@@ -109,12 +110,12 @@ def fetch_items(query: str, price_to: int):
         href = (link_tag.get("href") or "").strip()
         link = urljoin(BASE_SITE, href)
 
-        # keep only real item links
         if not link.startswith("http"):
             continue
         if "/items/" not in link:
             continue
-        if link in seen_items:
+
+        if (not ignore_seen) and (link in seen_items):
             continue
 
         title = item.get("title") or link_tag.get_text(strip=True) or "New Listing"
@@ -137,7 +138,8 @@ def fetch_items(query: str, price_to: int):
             "image": image
         })
 
-        seen_items.add(link)
+        if not ignore_seen:
+            seen_items.add(link)
 
     return results
 
@@ -178,7 +180,7 @@ async def scan_loop():
             continue
 
         for query in list(KEYWORDS):
-            items = await asyncio.to_thread(fetch_items, query, MAX_PRICE)
+            items = await asyncio.to_thread(fetch_items, query, MAX_PRICE, False)
             print(f"🔎 {query}: new items {len(items)}", flush=True)
             if items:
                 await post_items(channel, query, items, limit=8)
@@ -226,7 +228,8 @@ async def status_cmd(interaction: discord.Interaction):
         f"Paused: **{paused}**\n"
         f"Max price: **£{MAX_PRICE}**\n"
         f"Scan interval: **{SCAN_INTERVAL}s**\n"
-        f"Keywords: **{len(KEYWORDS)}**",
+        f"Keywords: **{len(KEYWORDS)}**\n"
+        f"Seen items: **{len(seen_items)}**",
         ephemeral=True
     )
 
@@ -278,7 +281,12 @@ async def clear_keywords_cmd(interaction: discord.Interaction):
     KEYWORDS.clear()
     await interaction.response.send_message("🧹 Cleared all keywords.", ephemeral=True)
 
-@tree.command(name="search_now", description="Run a one-off search now and post results.")
+@tree.command(name="reset_seen", description="Clear seen items so listings can be posted again.")
+async def reset_seen_cmd(interaction: discord.Interaction):
+    seen_items.clear()
+    await interaction.response.send_message("✅ Cleared seen items.", ephemeral=True)
+
+@tree.command(name="search_now", description="Run a one-off search now and post results (ignores seen items).")
 async def search_now_cmd(interaction: discord.Interaction, keyword: str, max_price: int = 20):
     await interaction.response.defer(ephemeral=True)
 
@@ -289,7 +297,8 @@ async def search_now_cmd(interaction: discord.Interaction, keyword: str, max_pri
     if max_price < 1 or max_price > 500:
         return await interaction.followup.send("max_price must be between 1 and 500.", ephemeral=True)
 
-    items = await asyncio.to_thread(fetch_items, kw, max_price)
+    # ignore_seen=True so manual searches always show results
+    items = await asyncio.to_thread(fetch_items, kw, max_price, True)
     channel = await get_post_channel()
 
     if not items:
