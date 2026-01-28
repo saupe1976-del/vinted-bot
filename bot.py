@@ -13,8 +13,16 @@ if not DISCORD_TOKEN:
 CHANNEL_ID = 1466099001743900674  # your channel id
 
 KEYWORDS = [
-    "zara coat",
-    "nike hoodie"
+    KEYWORDS = [
+    "bundle",
+    "clothes bundle",
+    "job lot",
+    "joblot",
+    "lot",
+    "clothing lot",
+    "wardrobe bundle",
+    "mystery bundle",
+    "reseller bundle"
 ]
 
 MAX_PRICE = 50
@@ -136,6 +144,7 @@ async def on_ready():
 
 if __name__ == "__main__":
     client.run(DISCORD_TOKEN)
+
 
 
 
