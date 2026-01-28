@@ -163,11 +163,17 @@ def fetch_items(query: str, price_to: int, ignore_seen: bool = False, apply_filt
         if apply_filter and (not looks_like_clothes(title)):
             continue
 
-        price_tag = item.select_one("span[data-testid='price']")
-        price_text = price_tag.get_text(strip=True) if price_tag else ""
-        price_num = parse_price_gbp(price_text)
-        if price_num is None or price_num > price_to:
-            continue
+       price_tag = item.select_one("span[data-testid='price']")
+price_text = price_tag.get_text(strip=True) if price_tag else ""
+price_num = parse_price_gbp(price_text)
+
+# ADD THESE DEBUG LINES:
+if passed < 3:  # Only log first 3 to avoid spam
+    print(f"DEBUG item {passed}: title='{title[:50]}'", flush=True)
+    print(f"  price_text='{price_text}', price_num={price_num}", flush=True)
+
+if price_num is None or price_num > price_to:
+    continue
 
         image_tag = item.find("img")
         image = image_tag.get("src") if image_tag else None
@@ -376,5 +382,6 @@ async def search_now_cmd(interaction: discord.Interaction, keyword: str, max_pri
 
 if __name__ == "__main__":
     client.run(DISCORD_TOKEN)
+
 
 
