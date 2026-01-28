@@ -31,6 +31,10 @@ KEYWORDS = [
 MAX_PRICE = 20
 SCAN_INTERVAL = 300  # seconds (change anytime via /set_interval)
 
+# Profit detection (change anytime via slash commands)
+MIN_EST_PROFIT_GBP = 15   # only alert if estimated profit >= this
+MIN_CONFIDENCE = 3        # 1-6 (higher = fewer alerts, more strict)
+
 BASE_URL = "https://www.vinted.co.uk/catalog"
 BASE_SITE = "https://www.vinted.co.uk"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
@@ -75,11 +79,116 @@ def looks_like_womens_or_mens_clothes(title: str) -> bool:
         return False
     return any(word in t for word in WOMENS_MENS_TERMS)
 
+# ============ PROFIT HEURISTICS ============
+
+BRAND_BONUS = {
+    "nike": 6,
+    "adidas": 5,
+    "zara": 3,
+    "uniqlo": 3,
+    "carhartt": 8,
+    "north face": 9,
+    "the north face": 9,
+    "ralph lauren": 8,
+    "tommy hilfiger": 6,
+    "levi": 7,
+    "levis": 7,
+}
+
+VALUE_HINTS = {
+    "reseller": 4,
+    "resell": 4,
+    "vintage": 4,
+    "designer": 6,
+    "new with tags": 6,
+    "bnwt": 6,
+    "nwt": 6,
+}
+
 def parse_price_gbp(text: str) -> float | None:
     if not text:
         return None
     m = re.search(r"(\d+(?:\.\d{1,2})?)", text.replace(",", ""))
     return float(m.group(1)) if m else None
+
+def estimate_item_count(title: str) -> int | None:
+    t = (title or "").lower()
+    patterns = [
+        r"\b(\d{1,3})\s*(?:items|item|pcs|pc|pieces|piece)\b",
+        r"\bx\s*(\d{1,3})\b",
+        r"\b(\d{1,3})\s*x\b",
+    ]
+    for p in patterns:
+        m = re.search(p, t)
+        if m:
+            n = int(m.group(1))
+            if 2 <= n <= 200:
+                return n
+    return None
+
+def score_title_value(title: str) -> tuple[int, list[str]]:
+    t = (title or "").lower()
+    score = 0
+    reasons = []
+    for k, v in BRAND_BONUS.items():
+        if k in t:
+            score += v
+            reasons.append(k)
+    for k, v in VALUE_HINTS.items():
+        if k in t:
+            score += v
+            reasons.append(k)
+    return score, reasons
+
+def estimate_resale_value_gbp(title: str, bundle_price: float) -> tuple[float, int, str]:
+    """
+    Returns (estimated_resale_value, confidence 1-6, explanation string)
+    """
+    t = (title or "").lower()
+    count = estimate_item_count(title)
+    score, reasons = score_title_value(title)
+
+    confidence = 1
+    explanation_bits = []
+
+    base_per_item = 3.0
+    if "designer" in t:
+        base_per_item = 8.0
+    if "vintage" in t:
+        base_per_item = max(base_per_item, 6.0)
+
+    if score >= 6:
+        base_per_item += 2.0
+        confidence += 1
+    if score >= 12:
+        base_per_item += 3.0
+        confidence += 1
+
+    if count:
+        confidence += 2
+        explanation_bits.append(f"{count} items")
+        est = count * base_per_item
+    else:
+        est = 5 * base_per_item
+        explanation_bits.append("count unknown (~5)")
+
+    if bundle_price <= 10:
+        est *= 1.15
+        confidence += 1
+        explanation_bits.append("low price boost")
+
+    if reasons:
+        explanation_bits.append("signals: " + ", ".join(reasons[:5]))
+        confidence += 1
+
+    confidence = max(1, min(6, confidence))
+    return est, confidence, " • ".join(explanation_bits)
+
+# =========================================
+
+intents = discord.Intents.default()
+client = discord.Client(intents=intents)
+tree = discord.app_commands.CommandTree(client)
 
 def build_search_url(keyword: str, price_to: int) -> str:
     return f"{BASE_URL}?search_text={keyword.replace(' ', '+')}&price_to={price_to}"
@@ -106,7 +215,6 @@ def fetch_items(keyword: str, price_to: int):
         href = (link_tag.get("href") or "").strip()
         link = urljoin(BASE_SITE, href)
 
-        # keep only real item links
         if not link.startswith("http"):
             continue
         if "/items/" not in link:
@@ -120,8 +228,17 @@ def fetch_items(keyword: str, price_to: int):
 
         price_tag = item.select_one("span[data-testid='price']")
         price_text = price_tag.get_text(strip=True) if price_tag else ""
-        price_num = parse_price_gbp(price_text)
-        if price_num is None or price_num > price_to:
+        bundle_price = parse_price_gbp(price_text)
+        if bundle_price is None or bundle_price > price_to:
+            continue
+
+        # Profit detection
+        est_value, confidence, explain = estimate_resale_value_gbp(title, bundle_price)
+        est_profit = est_value - bundle_price
+
+        if confidence < MIN_CONFIDENCE:
+            continue
+        if est_profit < MIN_EST_PROFIT_GBP:
             continue
 
         image_tag = item.find("img")
@@ -129,20 +246,19 @@ def fetch_items(keyword: str, price_to: int):
 
         results.append({
             "title": title[:256],
-            "price": price_text or f"£{price_num:.2f}",
+            "price_text": price_text or f"£{bundle_price:.2f}",
+            "price_num": bundle_price,
             "link": link,
-            "image": image
+            "image": image,
+            "est_value": est_value,
+            "est_profit": est_profit,
+            "confidence": confidence,
+            "explain": explain
         })
 
         seen_items.add(link)
 
     return results
-
-# ================= DISCORD =================
-
-intents = discord.Intents.default()
-client = discord.Client(intents=intents)
-tree = discord.app_commands.CommandTree(client)
 
 async def get_post_channel():
     return await client.fetch_channel(CHANNEL_ID)
@@ -153,12 +269,17 @@ async def post_items(channel, keyword: str, items: list[dict], limit: int = 8):
         embed = discord.Embed(
             title=item["title"],
             url=item["link"],
-            description=f"💷 {item['price']}",
+            description=(
+                f"💷 {item['price_text']}\n"
+                f"📈 Est value: £{item['est_value']:.0f}\n"
+                f"💰 Est profit: £{item['est_profit']:.0f}\n"
+                f"🎯 Confidence: {item['confidence']}/6"
+            ),
             color=0x2ecc71
         )
         if item.get("image"):
             embed.set_thumbnail(url=item["image"])
-        embed.set_footer(text=f"Search: {keyword}")
+        embed.set_footer(text=f"{keyword} | {item['explain'][:180]}")
         await channel.send(embed=embed)
         sent += 1
     return sent
@@ -176,7 +297,7 @@ async def scan_loop():
 
         for keyword in list(KEYWORDS):
             items = await asyncio.to_thread(fetch_items, keyword, MAX_PRICE)
-            print(f"🔎 {keyword}: new items {len(items)}", flush=True)
+            print(f"🔎 {keyword}: profitable items {len(items)}", flush=True)
             if items:
                 await post_items(channel, keyword, items, limit=8)
 
@@ -186,7 +307,6 @@ async def scan_loop():
 async def on_ready():
     print(f"Logged in as {client.user}", flush=True)
 
-    # Sync commands to your server so they appear immediately
     try:
         if GUILD_ID:
             guild_obj = discord.Object(id=GUILD_ID)
@@ -198,7 +318,10 @@ async def on_ready():
             print("✅ Slash commands synced globally (may take time to appear)", flush=True)
 
         channel = await get_post_channel()
-        await channel.send("✅ Vinted bot is live. Use /pause /resume /search_now")
+        await channel.send(
+            f"✅ Vinted bot live. Alerts: profit ≥ £{MIN_EST_PROFIT_GBP}, confidence ≥ {MIN_CONFIDENCE}/6. "
+            f"Use /set_profit_min /set_confidence_min."
+        )
     except Exception as e:
         print(f"❌ Startup error: {e}", flush=True)
 
@@ -224,7 +347,9 @@ async def status_cmd(interaction: discord.Interaction):
         f"Paused: **{paused}**\n"
         f"Max price: **£{MAX_PRICE}**\n"
         f"Scan interval: **{SCAN_INTERVAL}s**\n"
-        f"Keywords: **{len(KEYWORDS)}**",
+        f"Keywords: **{len(KEYWORDS)}**\n"
+        f"Min est profit: **£{MIN_EST_PROFIT_GBP}**\n"
+        f"Min confidence: **{MIN_CONFIDENCE}/6**",
         ephemeral=True
     )
 
@@ -243,6 +368,22 @@ async def set_price_cmd(interaction: discord.Interaction, pounds: int):
         return await interaction.response.send_message("Pick a price between £1 and £500.", ephemeral=True)
     MAX_PRICE = pounds
     await interaction.response.send_message(f"✅ Max price set to £{MAX_PRICE}.", ephemeral=True)
+
+@tree.command(name="set_profit_min", description="Set minimum estimated profit in £ (0-200).")
+async def set_profit_min_cmd(interaction: discord.Interaction, pounds: int):
+    global MIN_EST_PROFIT_GBP
+    if pounds < 0 or pounds > 200:
+        return await interaction.response.send_message("Pick between £0 and £200.", ephemeral=True)
+    MIN_EST_PROFIT_GBP = pounds
+    await interaction.response.send_message(f"✅ Min estimated profit set to £{MIN_EST_PROFIT_GBP}.", ephemeral=True)
+
+@tree.command(name="set_confidence_min", description="Set minimum confidence (1-6).")
+async def set_confidence_min_cmd(interaction: discord.Interaction, level: int):
+    global MIN_CONFIDENCE
+    if level < 1 or level > 6:
+        return await interaction.response.send_message("Pick a level between 1 and 6.", ephemeral=True)
+    MIN_CONFIDENCE = level
+    await interaction.response.send_message(f"✅ Min confidence set to {MIN_CONFIDENCE}/6.", ephemeral=True)
 
 @tree.command(name="keywords", description="List current keywords.")
 async def keywords_cmd(interaction: discord.Interaction):
@@ -276,7 +417,7 @@ async def clear_keywords_cmd(interaction: discord.Interaction):
     KEYWORDS.clear()
     await interaction.response.send_message("🧹 Cleared all keywords.", ephemeral=True)
 
-@tree.command(name="search_now", description="Run a one-off search now and post results.")
+@tree.command(name="search_now", description="Run a one-off profitable search now and post results.")
 async def search_now_cmd(interaction: discord.Interaction, keyword: str, max_price: int = 20):
     await interaction.response.defer(ephemeral=True)
 
@@ -291,10 +432,14 @@ async def search_now_cmd(interaction: discord.Interaction, keyword: str, max_pri
     channel = await get_post_channel()
 
     if not items:
-        return await interaction.followup.send(f"Nothing found for `{kw}` up to £{max_price}.", ephemeral=True)
+        return await interaction.followup.send(
+            f"No profitable results for `{kw}` up to £{max_price} "
+            f"(profit ≥ £{MIN_EST_PROFIT_GBP}, confidence ≥ {MIN_CONFIDENCE}/6).",
+            ephemeral=True
+        )
 
     sent = await post_items(channel, kw, items, limit=8)
-    await interaction.followup.send(f"✅ Posted {sent} result(s) for `{kw}` (≤ £{max_price}).", ephemeral=True)
+    await interaction.followup.send(f"✅ Posted {sent} profitable result(s) for `{kw}`.", ephemeral=True)
 
 # =================================================
 
