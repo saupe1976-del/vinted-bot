@@ -14,8 +14,9 @@ if not DISCORD_TOKEN:
 
 CHANNEL_ID = 1466099001743900674
 
-# IMPORTANT: set this in Railway Variables for instant slash commands
-GUILD_ID_ENV = os.getenv("GUILD_ID")  # server id as string
+# Set this in Railway Variables for instant slash commands:
+# GUILD_ID = your server ID (right click server -> Copy ID)
+GUILD_ID_ENV = os.getenv("GUILD_ID")
 GUILD_ID = int(GUILD_ID_ENV) if GUILD_ID_ENV and GUILD_ID_ENV.isdigit() else None
 
 KEYWORDS = [
@@ -23,12 +24,12 @@ KEYWORDS = [
     "mens clothes bundle",
     "job lot womens clothes",
     "job lot mens clothes",
-    "wardrobe bundle",
-    "reseller bundle clothes",
+    "wardrobe bundle womens",
+    "wardrobe bundle mens",
 ]
 
 MAX_PRICE = 20
-SCAN_INTERVAL = 300  # seconds (can change via /set_interval)
+SCAN_INTERVAL = 300  # seconds (change anytime via /set_interval)
 
 BASE_URL = "https://www.vinted.co.uk/catalog"
 BASE_SITE = "https://www.vinted.co.uk"
@@ -105,6 +106,7 @@ def fetch_items(keyword: str, price_to: int):
         href = (link_tag.get("href") or "").strip()
         link = urljoin(BASE_SITE, href)
 
+        # keep only real item links
         if not link.startswith("http"):
             continue
         if "/items/" not in link:
@@ -184,7 +186,7 @@ async def scan_loop():
 async def on_ready():
     print(f"Logged in as {client.user}", flush=True)
 
-    # Instant command availability: sync to your server if GUILD_ID is set
+    # Sync commands to your server so they appear immediately
     try:
         if GUILD_ID:
             guild_obj = discord.Object(id=GUILD_ID)
@@ -193,17 +195,15 @@ async def on_ready():
             print(f"✅ Slash commands synced to guild {GUILD_ID}", flush=True)
         else:
             await tree.sync()
-            print("✅ Slash commands synced globally (can take a while to appear)", flush=True)
+            print("✅ Slash commands synced globally (may take time to appear)", flush=True)
 
         channel = await get_post_channel()
-        await channel.send("✅ Vinted bot live. Try /status or /search_now")
+        await channel.send("✅ Vinted bot is live. Use /pause /resume /search_now")
     except Exception as e:
         print(f"❌ Startup error: {e}", flush=True)
 
-    client.loop.create_task(scan_loop)
-
-    # IMPORTANT: start the scan loop (typo-proof)
-    client.loop.create_task(scan_loop())
+    # ✅ FIX: must call the coroutine with ()
+    asyncio.create_task(scan_loop())
 
 # ================= SLASH COMMANDS =================
 
@@ -229,7 +229,7 @@ async def status_cmd(interaction: discord.Interaction):
         ephemeral=True
     )
 
-@tree.command(name="set_interval", description="Set scan interval in seconds (e.g. 60, 300, 600).")
+@tree.command(name="set_interval", description="Set scan interval in seconds (15-3600).")
 async def set_interval_cmd(interaction: discord.Interaction, seconds: int):
     global SCAN_INTERVAL
     if seconds < 15 or seconds > 3600:
@@ -237,7 +237,7 @@ async def set_interval_cmd(interaction: discord.Interaction, seconds: int):
     SCAN_INTERVAL = seconds
     await interaction.response.send_message(f"✅ Scan interval set to {SCAN_INTERVAL}s.", ephemeral=True)
 
-@tree.command(name="set_price", description="Set max price in £ (e.g. 20).")
+@tree.command(name="set_price", description="Set max price in £ (1-500).")
 async def set_price_cmd(interaction: discord.Interaction, pounds: int):
     global MAX_PRICE
     if pounds < 1 or pounds > 500:
