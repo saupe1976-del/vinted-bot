@@ -10,7 +10,7 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 if not DISCORD_TOKEN:
     raise RuntimeError("DISCORD_TOKEN is missing in Railway environment variables")
 
-CHANNEL_ID = 1466099001110565068  # your channel id
+CHANNEL_ID = 1466099001743900674  # your channel id
 
 KEYWORDS = [
     "zara coat",
@@ -136,4 +136,5 @@ async def on_ready():
 
 if __name__ == "__main__":
     client.run(DISCORD_TOKEN)
+
 
