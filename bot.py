@@ -123,8 +123,17 @@ async def scan_loop():
 @client.event
 async def on_ready():
     print(f"Logged in as {client.user}")
+
+    channel = client.get_channel(CHANNEL_ID)
+    if channel:
+        await channel.send("✅ Vinted bot started and can post here.")
+    else:
+        print("❌ Channel not found / no access (check CHANNEL_ID + permissions).")
+
     client.loop.create_task(scan_loop())
+
 
 
 if __name__ == "__main__":
     client.run(DISCORD_TOKEN)
+
