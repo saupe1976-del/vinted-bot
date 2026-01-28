@@ -3,6 +3,7 @@ import requests
 import asyncio
 import os
 from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 
 # ================= CONFIG =================
 
@@ -17,7 +18,6 @@ KEYWORDS = [
     "clothes bundle",
     "job lot",
     "joblot",
-    "lot",
     "clothing lot",
     "wardrobe bundle",
     "mystery bundle",
@@ -25,9 +25,10 @@ KEYWORDS = [
 ]
 
 MAX_PRICE = 50
-SCAN_INTERVAL = 30  # seconds (testing)
+SCAN_INTERVAL = 30  # seconds (testing). Change to 600 for 10 minutes later.
 
 BASE_URL = "https://www.vinted.co.uk/catalog"
+BASE_SITE = "https://www.vinted.co.uk"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0"
@@ -42,11 +43,13 @@ client = discord.Client(intents=intents)
 
 
 def build_search_url(keyword: str) -> str:
+    # Simple keyword search + max price
     return f"{BASE_URL}?search_text={keyword.replace(' ', '+')}&price_to={MAX_PRICE}"
 
 
 def fetch_items(keyword: str):
     url = build_search_url(keyword)
+
     try:
         r = requests.get(url, headers=HEADERS, timeout=15)
     except Exception as e:
@@ -65,20 +68,29 @@ def fetch_items(keyword: str):
         if not link_tag:
             continue
 
-        link = "https://www.vinted.co.uk" + link_tag["href"]
+        href = (link_tag.get("href") or "").strip()
+        link = urljoin(BASE_SITE, href)
+
+        # Skip junk links that break Discord embeds
+        if not (link.startswith("https://") or link.startswith("http://")):
+            continue
+        if "/items/" not in link:
+            continue
 
         if link in seen_items:
             continue
 
-        title = item.get("title") or "New Listing"
+        # Title/price/image extraction (best-effort; Vinted markup changes)
+        title = item.get("title") or link_tag.get_text(strip=True) or "New Listing"
+
         price_tag = item.select_one("span[data-testid='price']")
         image_tag = item.find("img")
 
-        price = price_tag.text.strip() if price_tag else "£?"
-        image = image_tag["src"] if (image_tag and image_tag.get("src")) else None
+        price = price_tag.get_text(strip=True) if price_tag else "£?"
+        image = image_tag.get("src") if image_tag else None
 
         results.append({
-            "title": title,
+            "title": title[:256],  # Discord embed title limit safety
             "price": price,
             "link": link,
             "image": image
@@ -111,6 +123,7 @@ async def scan_loop():
                     description=f"💷 {item['price']}",
                     color=0x2ecc71
                 )
+
                 if item["image"]:
                     embed.set_thumbnail(url=item["image"])
 
