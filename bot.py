@@ -13,7 +13,6 @@ if not DISCORD_TOKEN:
 CHANNEL_ID = 1466099001743900674  # your channel id
 
 KEYWORDS = [
-    KEYWORDS = [
     "bundle",
     "clothes bundle",
     "job lot",
@@ -22,12 +21,11 @@ KEYWORDS = [
     "clothing lot",
     "wardrobe bundle",
     "mystery bundle",
-    "reseller bundle"
-]
+    "reseller bundle",
 ]
 
 MAX_PRICE = 50
-SCAN_INTERVAL = 30  # 10 minutes
+SCAN_INTERVAL = 30  # seconds (testing)
 
 BASE_URL = "https://www.vinted.co.uk/catalog"
 
@@ -52,13 +50,13 @@ def fetch_items(keyword: str):
     try:
         r = requests.get(url, headers=HEADERS, timeout=15)
     except Exception as e:
-        print(f"❌ Request failed for '{keyword}': {e}")
+        print(f"❌ Request failed for '{keyword}': {e}", flush=True)
         return []
 
     soup = BeautifulSoup(r.text, "html.parser")
     items = soup.select("div.feed-grid__item")
 
-    print(f"🌐 {keyword} -> status {r.status_code}, items in page: {len(items)}")
+    print(f"🌐 {keyword} -> status {r.status_code}, items in page: {len(items)}", flush=True)
 
     results = []
 
@@ -72,9 +70,7 @@ def fetch_items(keyword: str):
         if link in seen_items:
             continue
 
-        # Vinted pages often don't store title in a simple attribute; keep fallback
         title = item.get("title") or "New Listing"
-
         price_tag = item.select_one("span[data-testid='price']")
         image_tag = item.find("img")
 
@@ -95,19 +91,18 @@ def fetch_items(keyword: str):
 
 async def scan_loop():
     await client.wait_until_ready()
-    channel = client.get_channel(CHANNEL_ID)
 
-    if channel is None:
-        print("❌ Channel not found. Check CHANNEL_ID, make sure the bot is in that server, and it can view that channel.")
+    try:
+        channel = await client.fetch_channel(CHANNEL_ID)
+        print(f"✅ Posting to channel: {channel} ({CHANNEL_ID})", flush=True)
+    except Exception as e:
+        print(f"❌ Channel fetch failed: {e}", flush=True)
         return
-
-    print(f"✅ Posting to channel: {channel} ({CHANNEL_ID})")
 
     while not client.is_closed():
         for keyword in KEYWORDS:
-            # Run blocking HTTP in a thread so the bot stays responsive
             items = await asyncio.to_thread(fetch_items, keyword)
-            print(f"🔎 {keyword}: NEW items found {len(items)}")
+            print(f"🔎 {keyword}: NEW items found {len(items)}", flush=True)
 
             for item in items:
                 embed = discord.Embed(
@@ -124,29 +119,24 @@ async def scan_loop():
                 try:
                     await channel.send(embed=embed)
                 except Exception as e:
-                    print(f"❌ Failed to send message: {e}")
+                    print(f"❌ Failed to send message: {e}", flush=True)
 
         await asyncio.sleep(SCAN_INTERVAL)
 
 
 @client.event
 async def on_ready():
-    print(f"Logged in as {client.user}")
+    print(f"Logged in as {client.user}", flush=True)
 
-    channel = client.get_channel(CHANNEL_ID)
-    if channel:
+    try:
+        channel = await client.fetch_channel(CHANNEL_ID)
         await channel.send("✅ Vinted bot started and can post here.")
-    else:
-        print("❌ Channel not found / no access (check CHANNEL_ID + permissions).")
+        print("✅ Startup message sent", flush=True)
+    except Exception as e:
+        print(f"❌ Startup send failed: {e}", flush=True)
 
     client.loop.create_task(scan_loop())
 
 
-
 if __name__ == "__main__":
     client.run(DISCORD_TOKEN)
-
-
-
-
-
