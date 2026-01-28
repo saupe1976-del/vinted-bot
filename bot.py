@@ -40,25 +40,34 @@ HEADERS = {
 paused = False
 seen_items = set()
 
-# ============ FILTERING (clothes only) ============
+# ============ FILTERING (clothes-focused, but not too strict) ============
 
 CLOTHING_TERMS = [
-    # generic
-    "clothes", "clothing", "wardrobe", "bundle", "job lot", "joblot", "lot",
-    # items
+    # generic bundle terms often used for clothes bundles
+    "bundle", "set", "job lot", "joblot", "lot", "wardrobe",
+    "reseller", "resellers",
+    # weight-based bundles
+    "kg", "kilo",
+    # clothing words
+    "clothes", "clothing",
     "top", "tops", "tshirt", "t-shirt", "tee",
     "hoodie", "jumper", "sweater",
     "jeans", "trousers", "pants", "shorts",
     "leggings", "dress", "skirt",
     "coat", "jacket", "shirt", "shirts", "blouse",
     "tracksuit", "joggers",
-    # sizing signals
+    # condition signals common in titles
+    "very good", "new with tags", "bnwt", "nwt",
+    # sizing signals (very common in clothes bundle titles)
     "size", "uk", "xs", "s", "m", "l", "xl", "xxl",
     "uk 4", "uk 6", "uk 8", "uk 10", "uk 12", "uk 14", "uk 16", "uk 18", "uk 20",
+    "uk 4-6", "uk 6-8", "uk 8-10", "uk 10-12", "uk 12-14", "uk 14-16",
 ]
 
 BANNED_TERMS = [
+    # kids/baby bundles (optional: remove if you want kids clothes too)
     "kids", "kid", "girls", "boys", "baby", "toddler",
+    # common non-clothing bundles
     "toy", "toys", "lego",
     "game", "games", "ps4", "ps5", "xbox", "switch", "nintendo",
     "book", "books", "dvd", "blu-ray", "cd",
@@ -69,9 +78,23 @@ BANNED_TERMS = [
 
 def looks_like_clothes(title: str) -> bool:
     t = (title or "").lower()
+
     if any(bad in t for bad in BANNED_TERMS):
         return False
-    return any(word in t for word in CLOTHING_TERMS)
+
+    # If it contains any clothing/size/reseller signal, accept
+    if any(word in t for word in CLOTHING_TERMS):
+        return True
+
+    # Extra fallback: UK size range like "UK 4-6"
+    if re.search(r"\buk\s*\d{1,2}\s*-\s*\d{1,2}\b", t):
+        return True
+
+    # Extra fallback: clothing letter sizes like "XS / UK 4-6"
+    if re.search(r"\b(xs|s|m|l|xl|xxl)\b", t):
+        return True
+
+    return False
 
 def parse_price_gbp(text: str) -> float | None:
     if not text:
