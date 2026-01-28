@@ -139,8 +139,11 @@ def fetch_items(query: str, price_to: int, ignore_seen: bool = False, apply_filt
     if not items:
         items = soup.select('[data-testid="feed-item"]')
 
+    print(f"DEBUG: Found {len(items)} items on page for query '{query}'", flush=True)
+
     results = []
     passed = 0
+    debug_count = 0
 
     for item in items:
         link_tag = item.find("a", href=True)
@@ -160,23 +163,33 @@ def fetch_items(query: str, price_to: int, ignore_seen: bool = False, apply_filt
 
         title = item.get("title") or link_tag.get_text(strip=True) or "New Listing"
 
+        # DEBUG: Print first few items regardless of filtering
+        if debug_count < 3:
+            print(f"DEBUG item {debug_count}: title='{title[:80]}'", flush=True)
+            debug_count += 1
+
         if apply_filter and (not looks_like_clothes(title)):
+            if debug_count <= 3:
+                print(f"  -> FILTERED OUT by looks_like_clothes()", flush=True)
             continue
 
-       price_tag = item.select_one("span[data-testid='price']")
-price_text = price_tag.get_text(strip=True) if price_tag else ""
-price_num = parse_price_gbp(price_text)
-
-# ADD THESE DEBUG LINES:
-if passed < 3:  # Only log first 3 to avoid spam
-    print(f"DEBUG item {passed}: title='{title[:50]}'", flush=True)
-    print(f"  price_text='{price_text}', price_num={price_num}", flush=True)
-
-if price_num is None or price_num > price_to:
-    continue
+        price_tag = item.select_one("span[data-testid='price']")
+        price_text = price_tag.get_text(strip=True) if price_tag else ""
+        price_num = parse_price_gbp(price_text)
+        
+        if debug_count <= 3:
+            print(f"  price_text='{price_text}', price_num={price_num}, max={price_to}", flush=True)
+        
+        if price_num is None or price_num > price_to:
+            if debug_count <= 3:
+                print(f"  -> FILTERED OUT by price (None or > {price_to})", flush=True)
+            continue
 
         image_tag = item.find("img")
         image = image_tag.get("src") if image_tag else None
+
+        if debug_count <= 3:
+            print(f"  -> PASSED ALL FILTERS!", flush=True)
 
         results.append({
             "title": title[:256],
@@ -330,7 +343,7 @@ async def add_keyword_cmd(interaction: discord.Interaction, keyword: str):
 async def remove_keyword_cmd(interaction: discord.Interaction, keyword: str):
     kw = keyword.strip()
     if kw not in KEYWORDS:
-        return await interaction.response.send_message("That keyword isn’t in the list.", ephemeral=True)
+        return await interaction.response.send_message("That keyword isn't in the list.", ephemeral=True)
     KEYWORDS.remove(kw)
     await interaction.response.send_message(f"🗑️ Removed keyword: `{kw}`", ephemeral=True)
 
@@ -364,6 +377,7 @@ async def search_now_cmd(interaction: discord.Interaction, keyword: str, max_pri
         f"Passed filter: {meta['passed']}\n"
         f"Bypass filter: {bypass_filter}\n"
         f"adult_only: {adult_only}\n"
+        f"Check Railway logs for detailed debug output!\n"
     )
 
     if not items:
@@ -382,6 +396,3 @@ async def search_now_cmd(interaction: discord.Interaction, keyword: str, max_pri
 
 if __name__ == "__main__":
     client.run(DISCORD_TOKEN)
-
-
-
