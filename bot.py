@@ -14,8 +14,6 @@ if not DISCORD_TOKEN:
 
 CHANNEL_ID = 1466099001743900674
 
-# Set this in Railway Variables for instant slash commands:
-# GUILD_ID = your server ID (right click server -> Copy ID)
 GUILD_ID_ENV = os.getenv("GUILD_ID")
 GUILD_ID = int(GUILD_ID_ENV) if GUILD_ID_ENV and GUILD_ID_ENV.isdigit() else None
 
@@ -29,26 +27,22 @@ KEYWORDS = [
 ]
 
 MAX_PRICE = 20
-SCAN_INTERVAL = 300  # seconds (change anytime via /set_interval)
+SCAN_INTERVAL = 300  # seconds
 
 BASE_URL = "https://www.vinted.co.uk/catalog"
 BASE_SITE = "https://www.vinted.co.uk"
-HEADERS = {
-    "User-Agent": "Mozilla/5.0"
-}
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 paused = False
+adult_only = True
 seen_items = set()
 
-# ============ FILTERING (clothes-focused, but not too strict) ============
+# ============ FILTERING ============
 
 CLOTHING_TERMS = [
-    # generic bundle terms often used for clothes bundles
     "bundle", "set", "job lot", "joblot", "lot", "wardrobe",
     "reseller", "resellers",
-    # weight-based bundles
     "kg", "kilo",
-    # clothing words
     "clothes", "clothing",
     "top", "tops", "tshirt", "t-shirt", "tee",
     "hoodie", "jumper", "sweater",
@@ -56,18 +50,13 @@ CLOTHING_TERMS = [
     "leggings", "dress", "skirt",
     "coat", "jacket", "shirt", "shirts", "blouse",
     "tracksuit", "joggers",
-    # condition signals common in titles
     "very good", "new with tags", "bnwt", "nwt",
-    # sizing signals (very common in clothes bundle titles)
     "size", "uk", "xs", "s", "m", "l", "xl", "xxl",
     "uk 4", "uk 6", "uk 8", "uk 10", "uk 12", "uk 14", "uk 16", "uk 18", "uk 20",
     "uk 4-6", "uk 6-8", "uk 8-10", "uk 10-12", "uk 12-14", "uk 14-16",
 ]
 
 BANNED_TERMS = [
-    # kids/baby bundles (optional: remove if you want kids clothes too)
-    "kids", "kid", "girls", "boys", "baby", "toddler",
-    # common non-clothing bundles
     "toy", "toys", "lego",
     "game", "games", "ps4", "ps5", "xbox", "switch", "nintendo",
     "book", "books", "dvd", "blu-ray", "cd",
@@ -76,21 +65,31 @@ BANNED_TERMS = [
     "mug", "home", "kitchen",
 ]
 
+KIDS_AGE_PATTERNS = [
+    r"\b\d{1,2}\s*-\s*\d{1,2}\s*(?:years|yrs)\b",
+    r"\b(?:age|ages)\s*\d{1,2}\b",
+    r"\b(?:years|yrs)\s*\d{1,2}\b",
+]
+KIDS_WORDS = ["kids", "kid", "baby", "toddler", "girls", "boys"]
+
 def looks_like_clothes(title: str) -> bool:
     t = (title or "").lower()
 
     if any(bad in t for bad in BANNED_TERMS):
         return False
 
-    # If it contains any clothing/size/reseller signal, accept
+    if adult_only:
+        if any(w in t for w in KIDS_WORDS):
+            return False
+        if any(re.search(p, t) for p in KIDS_AGE_PATTERNS):
+            return False
+
     if any(word in t for word in CLOTHING_TERMS):
         return True
 
-    # Extra fallback: UK size range like "UK 4-6"
     if re.search(r"\buk\s*\d{1,2}\s*-\s*\d{1,2}\b", t):
         return True
 
-    # Extra fallback: clothing letter sizes like "XS / UK 4-6"
     if re.search(r"\b(xs|s|m|l|xl|xxl)\b", t):
         return True
 
@@ -107,10 +106,6 @@ def build_search_url(query: str, price_to: int) -> str:
     return f"{BASE_URL}?search_text={q.replace(' ', '+')}&price_to={price_to}&order=newest_first"
 
 def fetch_items(query: str, price_to: int, ignore_seen: bool = False, apply_filter: bool = True):
-    """
-    Returns (items, meta)
-    meta includes: url, status, page_items, passed, error
-    """
     url = build_search_url(query, price_to)
 
     try:
@@ -121,7 +116,6 @@ def fetch_items(query: str, price_to: int, ignore_seen: bool = False, apply_filt
 
     soup = BeautifulSoup(r.text, "html.parser")
 
-    # primary + fallback selector (Vinted markup can change)
     items = soup.select("div.feed-grid__item")
     if not items:
         items = soup.select('[data-testid="feed-item"]')
@@ -172,7 +166,6 @@ def fetch_items(query: str, price_to: int, ignore_seen: bool = False, apply_filt
 
     meta = {"url": url, "status": r.status_code, "page_items": len(items), "passed": passed, "error": None}
     print(f"🌐 {query} -> status {r.status_code}, page_items {len(items)}, passed {passed}", flush=True)
-
     return results, meta
 
 # ================= DISCORD =================
@@ -231,10 +224,10 @@ async def on_ready():
             print(f"✅ Slash commands synced to guild {GUILD_ID}", flush=True)
         else:
             await tree.sync()
-            print("✅ Slash commands synced globally (may take time to appear)", flush=True)
+            print("✅ Slash commands synced globally (may take time)", flush=True)
 
         channel = await get_post_channel()
-        await channel.send("✅ Vinted bot live. Use /search_now (diagnostic enabled).")
+        await channel.send("✅ Vinted bot live. Use /search_now (max_price optional).")
     except Exception as e:
         print(f"❌ Startup error: {e}", flush=True)
 
@@ -254,10 +247,17 @@ async def resume_cmd(interaction: discord.Interaction):
     paused = False
     await interaction.response.send_message("▶️ Resumed scanning.", ephemeral=True)
 
+@tree.command(name="adult_only", description="Toggle skipping kids listings (true/false).")
+async def adult_only_cmd(interaction: discord.Interaction, enabled: bool):
+    global adult_only
+    adult_only = enabled
+    await interaction.response.send_message(f"✅ adult_only set to **{adult_only}**", ephemeral=True)
+
 @tree.command(name="status", description="Show current bot settings.")
 async def status_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(
         f"Paused: **{paused}**\n"
+        f"adult_only: **{adult_only}**\n"
         f"Max price: **£{MAX_PRICE}**\n"
         f"Scan interval: **{SCAN_INTERVAL}s**\n"
         f"Keywords: **{len(KEYWORDS)}**\n"
@@ -318,18 +318,29 @@ async def reset_seen_cmd(interaction: discord.Interaction):
     seen_items.clear()
     await interaction.response.send_message("✅ Cleared seen items.", ephemeral=True)
 
-@tree.command(name="search_now", description="Run a one-off search now and post results (diagnostic).")
-async def search_now_cmd(interaction: discord.Interaction, keyword: str, max_price: int = 20, bypass_filter: bool = False):
+@tree.command(name="search_now", description="Run a one-off search now and post results (max_price optional).")
+async def search_now_cmd(
+    interaction: discord.Interaction,
+    query: str,
+    bypass_filter: bool = False,
+    max_price: int | None = None,
+):
+    """
+    max_price:
+      - if provided, uses that
+      - if omitted, uses current MAX_PRICE (set via /set_price)
+    """
     await interaction.response.defer(ephemeral=True)
 
-    kw = keyword.strip()
-    if not kw:
-        return await interaction.followup.send("Give me a keyword.", ephemeral=True)
+    q = (query or "").strip()
+    if not q:
+        return await interaction.followup.send("Give me a query.", ephemeral=True)
 
-    if max_price < 1 or max_price > 500:
+    price_to = max_price if max_price is not None else MAX_PRICE
+    if price_to < 1 or price_to > 500:
         return await interaction.followup.send("max_price must be between 1 and 500.", ephemeral=True)
 
-    items, meta = await asyncio.to_thread(fetch_items, kw, max_price, True, not bypass_filter)
+    items, meta = await asyncio.to_thread(fetch_items, q, price_to, True, not bypass_filter)
     channel = await get_post_channel()
 
     diag = (
@@ -337,17 +348,18 @@ async def search_now_cmd(interaction: discord.Interaction, keyword: str, max_pri
         f"Page items: {meta['page_items']}\n"
         f"Passed filter: {meta['passed']}\n"
         f"Bypass filter: {bypass_filter}\n"
+        f"Price used: {price_to}\n"
     )
 
     if not items:
         return await interaction.followup.send(
-            f"No results for `{kw}` up to £{max_price}.\n\n{diag}",
+            f"No results for `{q}` up to £{price_to}.\n\n{diag}",
             ephemeral=True
         )
 
-    sent = await post_items(channel, kw, items, limit=8)
+    sent = await post_items(channel, q, items, limit=8)
     await interaction.followup.send(
-        f"✅ Posted {sent} result(s) for `{kw}` (≤ £{max_price}).\n\n{diag}",
+        f"✅ Posted {sent} result(s) for `{q}` (≤ £{price_to}).\n\n{diag}",
         ephemeral=True
     )
 
