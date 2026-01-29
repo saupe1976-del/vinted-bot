@@ -27,7 +27,6 @@ KEYWORDS = [
     "job lot clothes",
     "joblot clothes",
     "bundle items",
-    "kg clothes",
 ]
 
 MAX_PRICE = 20
@@ -74,15 +73,21 @@ BANNED_TERMS = [
     "phone", "iphone", "ipad", "tablet", "laptop",
     "makeup", "skincare", "perfume",
     "mug", "home", "kitchen",
+    "nappy", "nappies", "diaper", "diapers", "bib", "bibs",
+    "dummy", "dummies", "pacifier", "bottle", "bottles",
+    "pram", "pushchair", "stroller", "buggy",
 ]
 
 # When adult_only is on, we skip listings that look clearly child-age based
 KIDS_AGE_PATTERNS = [
-    r"\b\d{1,2}\s*-\s*\d{1,2}\s*(?:years|yrs)\b",   # "6-7 years"
-    r"\b(?:age|ages)\s*\d{1,2}\b",                  # "age 6"
-    r"\b(?:years|yrs)\s*\d{1,2}\b",                 # "years 6"
+    r"\b\d{1,2}\s*-\s*\d{1,2}\s*(?:years|yrs|year|yr)\b",   # "6-7 years", "6-7 year"
+    r"\b(?:age|ages)\s*\d{1,2}\b",                           # "age 6"
+    r"\b(?:years|yrs|year|yr)\s*\d{1,2}\b",                  # "years 6"
+    r"\b\d{1,2}\s*(?:years|yrs|year|yr)\s*old\b",            # "6 years old"
+    r"\b\d{1,2}\s*month",                                     # "12 months", "18 month"
 ]
-KIDS_WORDS = ["kids", "kid", "baby", "toddler", "girls", "boys"]
+KIDS_WORDS = ["kids", "kid", "baby", "toddler", "girls", "boys", "children", "child", 
+              "girl", "boy", "junior", "infant", "newborn", "teenage", "teen "]
 
 def looks_like_clothes(title: str) -> bool:
     t = (title or "").lower()
@@ -91,29 +96,45 @@ def looks_like_clothes(title: str) -> bool:
         return False
 
     if adult_only:
-        # If it explicitly mentions kids words OR age patterns, skip
-        if any(w in t for w in KIDS_WORDS):
-            return False
-        if any(re.search(p, t) for p in KIDS_AGE_PATTERNS):
+        # Check for kids words - be more thorough
+        for word in KIDS_WORDS:
+            if word in t:
+                return False
+        
+        # Check for age patterns
+        for pattern in KIDS_AGE_PATTERNS:
+            if re.search(pattern, t):
+                return False
+        
+        # Additional check: single digit ages (age 5, 5 years, etc.)
+        # But exclude adult sizes like "size 5" or "uk 5"
+        if re.search(r'(?<!size\s)(?<!uk\s)\b[0-9]\s*(?:years|yrs|year|yr)\b', t):
             return False
 
     # STRONG bundle indicators - at least one MUST be present
-    STRONG_BUNDLE_TERMS = ["bundle", "job lot", "joblot", "reseller", "kg", "kilo"]
+    STRONG_BUNDLE_TERMS = ["bundle", "job lot", "joblot", "reseller"]
     has_strong_bundle = any(term in t for term in STRONG_BUNDLE_TERMS)
     
-    # Quantity indicators
-    has_quantity = bool(re.search(r'\b\d+\s*(items?|pieces?|kg|kilo)', t))
+    # Quantity indicators - check for actual numbers before kg/kilo
+    has_weight = bool(re.search(r'\b\d+\s*(?:kg|kilo)', t))
+    has_quantity = bool(re.search(r'\b\d+\s*(?:items?|pieces?)', t))
+    
+    # "KG" as a brand (like Kurt Geiger, Mini Miss KG) should NOT count
+    # Only accept kg if it's preceded by a number
+    if not has_weight:
+        # Remove kg/kilo from consideration if no number before it
+        pass
     
     # Words that suggest it's a single item (AUTO-REJECT)
     SINGLE_ITEM_WORDS = ["bnwt", "new with tags", "nwt", "brand new", "never worn", 
                          "worn once", "excellent condition", "perfect condition"]
     if any(word in t for word in SINGLE_ITEM_WORDS):
-        # Only reject if there's NO strong bundle term
-        if not has_strong_bundle and not has_quantity:
+        # Only reject if there's NO strong bundle term and NO quantity/weight
+        if not has_strong_bundle and not has_quantity and not has_weight:
             return False
     
-    # Must have EITHER strong bundle term OR quantity
-    if not has_strong_bundle and not has_quantity:
+    # Must have EITHER strong bundle term OR quantity OR weight
+    if not has_strong_bundle and not has_quantity and not has_weight:
         return False
 
     # If it has bundle term + clothing words, accept
@@ -130,16 +151,16 @@ def looks_like_clothes(title: str) -> bool:
     if has_clothing_word:
         return True
     
-    # Weight-based bundles (usually clothes)
-    if "kg" in t or "kilo" in t:
+    # Weight-based bundles (with actual numbers like "5kg")
+    if has_weight:
         return True
     
     # Reseller + quantity is usually a bundle
-    if "reseller" in t and has_quantity:
+    if "reseller" in t and (has_quantity or has_weight):
         return True
     
     # Bundle + quantity + not banned = likely clothes
-    if has_strong_bundle and has_quantity:
+    if has_strong_bundle and (has_quantity or has_weight):
         return True
 
     return False
