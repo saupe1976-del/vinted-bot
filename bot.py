@@ -196,7 +196,32 @@ def fetch_items(query: str, price_to: int, ignore_seen: bool = False, apply_filt
         if (not ignore_seen) and (link in seen_items):
             continue
 
-        title = item.get("title") or link_tag.get_text(strip=True) or "New Listing"
+        # Try multiple ways to get the title (Vinted changes these frequently)
+        title = (
+            item.get("title") or
+            item.get("aria-label") or
+            link_tag.get("title") or
+            link_tag.get("aria-label")
+        )
+        
+        # If still no title, try text content from specific elements
+        if not title:
+            title_element = (
+                item.select_one("p[class*='Text']") or
+                item.select_one("div[class*='title']") or
+                item.select_one("h3") or
+                item.select_one("span[class*='title']")
+            )
+            if title_element:
+                title = title_element.get_text(strip=True)
+        
+        # Last resort: use link text
+        if not title:
+            title = link_tag.get_text(strip=True)
+        
+        # Final fallback
+        if not title:
+            title = "New Listing"
 
         # DEBUG: Print first few items regardless of filtering
         if debug_count < 3:
