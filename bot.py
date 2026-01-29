@@ -460,13 +460,13 @@ async def post_items(channel, query: str, items: list[dict], limit: int = 8):
         # Build description with profit info
         desc_parts = [f"💷 {item['price']}"]
         
-        # Add profit score
+        # Add profit score - ALWAYS show it
         score = item.get('profit_score', 0)
         if score >= 70:
             desc_parts.append(f"🔥 **GREAT DEAL** (Score: {score}/100)")
         elif score >= 50:
             desc_parts.append(f"✅ Good value (Score: {score}/100)")
-        elif score > 0:
+        else:
             desc_parts.append(f"📊 Score: {score}/100")
         
         # Add item count and price per item
