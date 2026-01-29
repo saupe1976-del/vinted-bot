@@ -69,6 +69,7 @@ def get_headers():
     }
 
 paused = False
+pause_until = None  # Timestamp for automatic resume
 adult_only = True   # default: try to avoid kids bundles
 seen_items = set()
 
@@ -511,8 +512,18 @@ async def scan_loop():
     channel = await get_post_channel()
     print(f"✅ Posting to channel: {channel} ({CHANNEL_ID})", flush=True)
 
-    global paused
+    global paused, pause_until
     while not client.is_closed():
+        # Check if pause timer has expired
+        if pause_until:
+            import datetime
+            now = datetime.datetime.now()
+            if now >= pause_until:
+                paused = False
+                pause_until = None
+                await channel.send("⏰ Pause timer ended - resuming scans!")
+                print(f"⏰ Auto-resumed scanning at {now}", flush=True)
+        
         if paused:
             await asyncio.sleep(5)
             continue
@@ -550,14 +561,36 @@ async def on_ready():
 
 @tree.command(name="pause", description="Pause the auto-scanner.")
 async def pause_cmd(interaction: discord.Interaction):
-    global paused
+    global paused, pause_until
     paused = True
-    await interaction.response.send_message("⏸️ Paused scanning.", ephemeral=True)
+    pause_until = None  # Clear any timer
+    await interaction.response.send_message("⏸️ Paused scanning indefinitely. Use /resume to restart.", ephemeral=True)
+
+@tree.command(name="pause_for", description="Pause scanner for a specific number of hours.")
+async def pause_for_cmd(interaction: discord.Interaction, hours: float):
+    import datetime
+    
+    if hours <= 0 or hours > 168:  # Max 1 week
+        return await interaction.response.send_message("Please choose between 0.1 and 168 hours (1 week).", ephemeral=True)
+    
+    global paused, pause_until
+    paused = True
+    pause_until = datetime.datetime.now() + datetime.timedelta(hours=hours)
+    
+    # Format the resume time nicely
+    resume_time = pause_until.strftime("%I:%M %p on %B %d")
+    
+    await interaction.response.send_message(
+        f"⏸️ Paused for {hours} hour(s).\n"
+        f"⏰ Will auto-resume at {resume_time}",
+        ephemeral=True
+    )
 
 @tree.command(name="resume", description="Resume the auto-scanner.")
 async def resume_cmd(interaction: discord.Interaction):
-    global paused
+    global paused, pause_until
     paused = False
+    pause_until = None
     await interaction.response.send_message("▶️ Resumed scanning.", ephemeral=True)
 
 @tree.command(name="adult_only", description="Toggle skipping kids listings (true/false).")
@@ -568,15 +601,25 @@ async def adult_only_cmd(interaction: discord.Interaction, enabled: bool):
 
 @tree.command(name="status", description="Show current bot settings.")
 async def status_cmd(interaction: discord.Interaction):
-    await interaction.response.send_message(
-        f"Paused: **{paused}**\n"
+    import datetime
+    
+    status_text = f"Paused: **{paused}**\n"
+    
+    if pause_until:
+        remaining = pause_until - datetime.datetime.now()
+        hours = remaining.total_seconds() / 3600
+        resume_time = pause_until.strftime("%I:%M %p on %B %d")
+        status_text += f"⏰ Auto-resume in {hours:.1f} hours at {resume_time}\n"
+    
+    status_text += (
         f"adult_only: **{adult_only}**\n"
         f"Max price: **£{MAX_PRICE}**\n"
         f"Scan interval: **{SCAN_INTERVAL}s**\n"
         f"Keywords: **{len(KEYWORDS)}**\n"
-        f"Seen items: **{len(seen_items)}**",
-        ephemeral=True
+        f"Seen items: **{len(seen_items)}**"
     )
+    
+    await interaction.response.send_message(status_text, ephemeral=True)
 
 @tree.command(name="set_interval", description="Set scan interval in seconds (15-3600).")
 async def set_interval_cmd(interaction: discord.Interaction, seconds: int):
