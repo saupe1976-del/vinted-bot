@@ -111,6 +111,8 @@ BANNED_TERMS = [
     "ring", "rings", "necklace", "bracelet", "earring", "earrings",
     "jewellery", "jewelry", "brooch", "pendant", "charm", "charms",
     "watch", "watches",
+    "card", "cards", "pokemon", "pokémon", "trading card", "yugioh", "yu-gi-oh",
+    "magic the gathering", "mtg", "sports card", "panini",
 ]
 
 # When adult_only is on, we skip listings that look clearly child-age based
