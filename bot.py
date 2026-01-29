@@ -21,11 +21,13 @@ GUILD_ID = int(GUILD_ID_ENV) if GUILD_ID_ENV and GUILD_ID_ENV.isdigit() else Non
 
 KEYWORDS = [
     "clothes bundle",
+    "clothing bundle",
     "reseller bundle",
     "wardrobe bundle",
     "job lot clothes",
     "joblot clothes",
-    "bundle",
+    "bundle items",
+    "kg clothes",
 ]
 
 MAX_PRICE = 20
@@ -95,16 +97,49 @@ def looks_like_clothes(title: str) -> bool:
         if any(re.search(p, t) for p in KIDS_AGE_PATTERNS):
             return False
 
-    # If it contains any clothing/size/reseller signal, accept
-    if any(word in t for word in CLOTHING_TERMS):
-        return True
+    # STRONG bundle indicators - at least one MUST be present
+    STRONG_BUNDLE_TERMS = ["bundle", "job lot", "joblot", "reseller", "kg", "kilo"]
+    has_strong_bundle = any(term in t for term in STRONG_BUNDLE_TERMS)
+    
+    # Quantity indicators
+    has_quantity = bool(re.search(r'\b\d+\s*(items?|pieces?|kg|kilo)', t))
+    
+    # Words that suggest it's a single item (AUTO-REJECT)
+    SINGLE_ITEM_WORDS = ["bnwt", "new with tags", "nwt", "brand new", "never worn", 
+                         "worn once", "excellent condition", "perfect condition"]
+    if any(word in t for word in SINGLE_ITEM_WORDS):
+        # Only reject if there's NO strong bundle term
+        if not has_strong_bundle and not has_quantity:
+            return False
+    
+    # Must have EITHER strong bundle term OR quantity
+    if not has_strong_bundle and not has_quantity:
+        return False
 
-    # Extra fallback: UK size range like "UK 4-6"
-    if re.search(r"\buk\s*\d{1,2}\s*-\s*\d{1,2}\b", t):
+    # If it has bundle term + clothing words, accept
+    CLOTHING_WORDS = [
+        "clothes", "clothing", "top", "tops", "tshirt", "t-shirt", "tee",
+        "hoodie", "jumper", "sweater", "jeans", "trousers", "pants", "shorts",
+        "leggings", "dress", "skirt", "coat", "jacket", "shirt", "shirts",
+        "blouse", "tracksuit", "joggers", "wardrobe"
+    ]
+    
+    has_clothing_word = any(word in t for word in CLOTHING_WORDS)
+    
+    # STRICT: Must have clothing word OR weight OR be explicitly a reseller bundle
+    if has_clothing_word:
         return True
-
-    # Extra fallback: clothing letter sizes like "XS / UK 4-6"
-    if re.search(r"\b(xs|s|m|l|xl|xxl)\b", t):
+    
+    # Weight-based bundles (usually clothes)
+    if "kg" in t or "kilo" in t:
+        return True
+    
+    # Reseller + quantity is usually a bundle
+    if "reseller" in t and has_quantity:
+        return True
+    
+    # Bundle + quantity + not banned = likely clothes
+    if has_strong_bundle and has_quantity:
         return True
 
     return False
