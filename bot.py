@@ -76,6 +76,9 @@ BANNED_TERMS = [
     "nappy", "nappies", "diaper", "diapers", "bib", "bibs",
     "dummy", "dummies", "pacifier", "bottle", "bottles",
     "pram", "pushchair", "stroller", "buggy",
+    "ring", "rings", "necklace", "bracelet", "earring", "earrings",
+    "jewellery", "jewelry", "brooch", "pendant", "charm", "charms",
+    "watch", "watches",
 ]
 
 # When adult_only is on, we skip listings that look clearly child-age based
