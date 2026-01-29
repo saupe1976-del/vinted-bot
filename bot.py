@@ -30,7 +30,7 @@ KEYWORDS = [
 ]
 
 MAX_PRICE = 20
-SCAN_INTERVAL = 300  # seconds (change anytime via /set_interval)
+SCAN_INTERVAL = 600  # seconds (10 minutes - less aggressive to avoid blocks)
 
 # Profitability settings
 MIN_ITEMS_FOR_PROFIT = 5  # Minimum items in bundle to be considered profitable
@@ -42,7 +42,31 @@ NEW_MEMBER_INDICATORS = ["new member", "just joined", "first listing"]
 
 BASE_URL = "https://www.vinted.co.uk/catalog"
 BASE_SITE = "https://www.vinted.co.uk"
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+
+# Rotate through different user agents to avoid detection
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
+]
+
+def get_headers():
+    """Get realistic browser headers with rotating user agent"""
+    import random
+    return {
+        "User-Agent": random.choice(USER_AGENTS),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-GB,en;q=0.5",
+        "Accept-Encoding": "gzip, deflate, br",
+        "DNT": "1",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Cache-Control": "max-age=0",
+    }
 
 paused = False
 adult_only = True   # default: try to avoid kids bundles
@@ -270,10 +294,16 @@ def fetch_items(query: str, price_to: int, ignore_seen: bool = False, apply_filt
     Returns (items, meta)
     meta includes: url, status, page_items, passed, error
     """
+    import random
+    import time
+    
+    # Add random delay to appear more human (1-3 seconds)
+    time.sleep(random.uniform(1, 3))
+    
     url = build_search_url(query, price_to)
 
     try:
-        r = requests.get(url, headers=HEADERS, timeout=15)
+        r = requests.get(url, headers=get_headers(), timeout=15)
     except Exception as e:
         print(f"❌ Request failed for '{query}': {e}", flush=True)
         return [], {"url": url, "status": None, "page_items": 0, "passed": 0, "error": str(e)}
