@@ -32,6 +32,14 @@ KEYWORDS = [
 MAX_PRICE = 20
 SCAN_INTERVAL = 300  # seconds (change anytime via /set_interval)
 
+# Profitability settings
+MIN_ITEMS_FOR_PROFIT = 5  # Minimum items in bundle to be considered profitable
+MAX_PRICE_PER_ITEM = 4.0  # Maximum price per item (£20 / 5 items = £4 per item)
+
+# New member settings (free postage)
+PREFER_NEW_MEMBERS = True  # Prioritize listings from new members (free postage)
+NEW_MEMBER_INDICATORS = ["new member", "just joined", "first listing"]
+
 BASE_URL = "https://www.vinted.co.uk/catalog"
 BASE_SITE = "https://www.vinted.co.uk"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
@@ -174,6 +182,85 @@ def parse_price_gbp(text: str) -> float | None:
     m = re.search(r"(\d+(?:\.\d{1,2})?)", text.replace(",", ""))
     return float(m.group(1)) if m else None
 
+def calculate_profitability_score(title: str, price: float) -> dict:
+    """
+    Calculate a profitability score based on:
+    - Number of items in the bundle
+    - Price per item
+    - Keywords that suggest good resale value
+    
+    Returns: {
+        'score': int (0-100),
+        'items_count': int or None,
+        'price_per_item': float or None,
+        'profit_indicators': list of strings
+    }
+    """
+    t = title.lower()
+    indicators = []
+    
+    # Try to extract number of items
+    items_match = re.search(r'(\d+)\s*(?:items?|pieces?|pc)', t)
+    items_count = int(items_match.group(1)) if items_match else None
+    
+    # Check for weight-based bundles (estimate items)
+    weight_match = re.search(r'(\d+)\s*(?:kg|kilo)', t)
+    if weight_match and not items_count:
+        kg = int(weight_match.group(1))
+        items_count = kg * 3  # Rough estimate: 3 items per kg
+        indicators.append(f"~{items_count} items (est. from {kg}kg)")
+    
+    # Calculate price per item
+    price_per_item = None
+    if items_count and items_count > 0:
+        price_per_item = price / items_count
+        indicators.append(f"£{price_per_item:.2f} per item")
+    
+    # Check for high-value keywords
+    HIGH_VALUE_TERMS = [
+        "branded", "designer", "next", "zara", "h&m", "primark",
+        "new with tags", "bnwt", "nwt", "unworn", "new",
+        "reseller", "resale"
+    ]
+    
+    for term in HIGH_VALUE_TERMS:
+        if term in t:
+            indicators.append(f"Has '{term}'")
+    
+    # Calculate score (0-100)
+    score = 0
+    
+    # Base score for having items count
+    if items_count:
+        if items_count >= MIN_ITEMS_FOR_PROFIT:
+            score += 40
+        elif items_count >= 3:
+            score += 20
+    
+    # Score based on price per item
+    if price_per_item:
+        if price_per_item <= 2.0:
+            score += 40  # Excellent deal
+        elif price_per_item <= 3.0:
+            score += 30  # Good deal
+        elif price_per_item <= MAX_PRICE_PER_ITEM:
+            score += 20  # Decent deal
+        else:
+            score -= 10  # Might not be profitable
+    
+    # Bonus for high-value indicators
+    score += min(len(indicators) * 5, 20)
+    
+    # Cap score at 100
+    score = min(max(score, 0), 100)
+    
+    return {
+        'score': score,
+        'items_count': items_count,
+        'price_per_item': price_per_item,
+        'profit_indicators': indicators
+    }
+
 def build_search_url(query: str, price_to: int) -> str:
     q = (query or "").strip()
     return f"{BASE_URL}?search_text={q.replace(' ', '+')}&price_to={price_to}&order=newest_first"
@@ -287,14 +374,31 @@ def fetch_items(query: str, price_to: int, ignore_seen: bool = False, apply_filt
         image_tag = item.find("img")
         image = image_tag.get("src") if image_tag else None
 
+        # Check for new member badge (free postage)
+        is_new_member = False
+        member_badge = item.select_one('[class*="badge"]') or item.select_one('[class*="member"]')
+        if member_badge:
+            badge_text = member_badge.get_text(strip=True).lower()
+            is_new_member = any(indicator in badge_text for indicator in NEW_MEMBER_INDICATORS)
+        
+        # Calculate profitability
+        profit_info = calculate_profitability_score(title, price_num)
+
         if debug_count <= 3:
-            print(f"  -> PASSED ALL FILTERS!", flush=True)
+            print(f"  -> PASSED ALL FILTERS! Profit score: {profit_info['score']}/100", flush=True)
+            if is_new_member:
+                print(f"  -> 🆕 NEW MEMBER (free postage!)", flush=True)
 
         results.append({
             "title": title[:256],
             "price": price_text or f"£{price_num:.2f}",
             "link": link,
-            "image": image
+            "image": image,
+            "profit_score": profit_info['score'],
+            "items_count": profit_info['items_count'],
+            "price_per_item": profit_info['price_per_item'],
+            "profit_indicators": profit_info['profit_indicators'],
+            "is_new_member": is_new_member
         })
         passed += 1
 
@@ -303,6 +407,9 @@ def fetch_items(query: str, price_to: int, ignore_seen: bool = False, apply_filt
 
     meta = {"url": url, "status": r.status_code, "page_items": len(items), "passed": passed, "error": None}
     print(f"🌐 {query} -> status {r.status_code}, page_items {len(items)}, passed {passed}", flush=True)
+
+    # Sort by profitability score (highest first), then prioritize new members
+    results.sort(key=lambda x: (x['is_new_member'], x['profit_score']), reverse=True)
 
     return results, meta
 
@@ -318,11 +425,47 @@ async def get_post_channel():
 async def post_items(channel, query: str, items: list[dict], limit: int = 8):
     sent = 0
     for item in items[:limit]:
+        # Build description with profit info
+        desc_parts = [f"💷 {item['price']}"]
+        
+        # Add profit score
+        score = item.get('profit_score', 0)
+        if score >= 70:
+            desc_parts.append(f"🔥 **GREAT DEAL** (Score: {score}/100)")
+        elif score >= 50:
+            desc_parts.append(f"✅ Good value (Score: {score}/100)")
+        elif score > 0:
+            desc_parts.append(f"📊 Score: {score}/100")
+        
+        # Add item count and price per item
+        if item.get('items_count'):
+            desc_parts.append(f"📦 {item['items_count']} items")
+        if item.get('price_per_item'):
+            desc_parts.append(f"💰 £{item['price_per_item']:.2f} per item")
+        
+        # Add profit indicators
+        if item.get('profit_indicators'):
+            desc_parts.append("\n" + " • ".join(item['profit_indicators'][:3]))
+        
+        # New member badge
+        if item.get('is_new_member'):
+            desc_parts.append("\n🆕 **NEW MEMBER - FREE POSTAGE!**")
+        
+        description = "\n".join(desc_parts)
+        
+        # Color based on profit score
+        if score >= 70:
+            color = 0xFFD700  # Gold
+        elif score >= 50:
+            color = 0x2ecc71  # Green
+        else:
+            color = 0x3498db  # Blue
+        
         embed = discord.Embed(
             title=item["title"],
             url=item["link"],
-            description=f"💷 {item['price']}",
-            color=0x2ecc71
+            description=description,
+            color=color
         )
         if item.get("image"):
             embed.set_thumbnail(url=item["image"])
