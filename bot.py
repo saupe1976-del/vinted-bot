@@ -564,14 +564,14 @@ async def pause_cmd(interaction: discord.Interaction):
     global paused, pause_until
     paused = True
     pause_until = None  # Clear any timer
-    await interaction.response.send_message("⏸️ Paused scanning indefinitely. Use /resume to restart.", ephemeral=True)
+    await interaction.response.send_message("⏸️ Paused scanning indefinitely. Use /resume to restart.")
 
 @tree.command(name="pause_for", description="Pause scanner for a specific number of hours.")
 async def pause_for_cmd(interaction: discord.Interaction, hours: float):
     import datetime
     
     if hours <= 0 or hours > 168:  # Max 1 week
-        return await interaction.response.send_message("Please choose between 0.1 and 168 hours (1 week).", ephemeral=True)
+        return await interaction.response.send_message("Please choose between 0.1 and 168 hours (1 week).")
     
     global paused, pause_until
     paused = True
@@ -582,8 +582,7 @@ async def pause_for_cmd(interaction: discord.Interaction, hours: float):
     
     await interaction.response.send_message(
         f"⏸️ Paused for {hours} hour(s).\n"
-        f"⏰ Will auto-resume at {resume_time}",
-        ephemeral=True
+        f"⏰ Will auto-resume at {resume_time}"
     )
 
 @tree.command(name="resume", description="Resume the auto-scanner.")
@@ -591,13 +590,13 @@ async def resume_cmd(interaction: discord.Interaction):
     global paused, pause_until
     paused = False
     pause_until = None
-    await interaction.response.send_message("▶️ Resumed scanning.", ephemeral=True)
+    await interaction.response.send_message("▶️ Resumed scanning.")
 
 @tree.command(name="adult_only", description="Toggle skipping kids listings (true/false).")
 async def adult_only_cmd(interaction: discord.Interaction, enabled: bool):
     global adult_only
     adult_only = enabled
-    await interaction.response.send_message(f"✅ adult_only set to **{adult_only}**", ephemeral=True)
+    await interaction.response.send_message(f"✅ adult_only set to **{adult_only}**")
 
 @tree.command(name="status", description="Show current bot settings.")
 async def status_cmd(interaction: discord.Interaction):
@@ -619,71 +618,71 @@ async def status_cmd(interaction: discord.Interaction):
         f"Seen items: **{len(seen_items)}**"
     )
     
-    await interaction.response.send_message(status_text, ephemeral=True)
+    await interaction.response.send_message(status_text)
 
 @tree.command(name="set_interval", description="Set scan interval in seconds (15-3600).")
 async def set_interval_cmd(interaction: discord.Interaction, seconds: int):
     global SCAN_INTERVAL
     if seconds < 15 or seconds > 3600:
-        return await interaction.response.send_message("Pick between 15 and 3600 seconds.", ephemeral=True)
+        return await interaction.response.send_message("Pick between 15 and 3600 seconds.")
     SCAN_INTERVAL = seconds
-    await interaction.response.send_message(f"✅ Scan interval set to {SCAN_INTERVAL}s.", ephemeral=True)
+    await interaction.response.send_message(f"✅ Scan interval set to {SCAN_INTERVAL}s.")
 
 @tree.command(name="set_price", description="Set max price in £ (1-500).")
 async def set_price_cmd(interaction: discord.Interaction, pounds: int):
     global MAX_PRICE
     if pounds < 1 or pounds > 500:
-        return await interaction.response.send_message("Pick a price between £1 and £500.", ephemeral=True)
+        return await interaction.response.send_message("Pick a price between £1 and £500.")
     MAX_PRICE = pounds
-    await interaction.response.send_message(f"✅ Max price set to £{MAX_PRICE}.", ephemeral=True)
+    await interaction.response.send_message(f"✅ Max price set to £{MAX_PRICE}.")
 
 @tree.command(name="keywords", description="List current keywords.")
 async def keywords_cmd(interaction: discord.Interaction):
     if not KEYWORDS:
-        return await interaction.response.send_message("No keywords set.", ephemeral=True)
+        return await interaction.response.send_message("No keywords set.")
     text = "\n".join(f"- {k}" for k in KEYWORDS[:40])
     if len(KEYWORDS) > 40:
         text += f"\n… and {len(KEYWORDS)-40} more"
-    await interaction.response.send_message(text, ephemeral=True)
+    await interaction.response.send_message(text)
 
 @tree.command(name="add_keyword", description="Add a keyword to the search list.")
 async def add_keyword_cmd(interaction: discord.Interaction, keyword: str):
     kw = keyword.strip()
     if not kw:
-        return await interaction.response.send_message("Give me a keyword.", ephemeral=True)
+        return await interaction.response.send_message("Give me a keyword.")
     if kw in KEYWORDS:
-        return await interaction.response.send_message("That keyword is already in the list.", ephemeral=True)
+        return await interaction.response.send_message("That keyword is already in the list.")
     KEYWORDS.append(kw)
-    await interaction.response.send_message(f"✅ Added keyword: `{kw}`", ephemeral=True)
+    await interaction.response.send_message(f"✅ Added keyword: `{kw}`")
 
 @tree.command(name="remove_keyword", description="Remove a keyword from the search list.")
 async def remove_keyword_cmd(interaction: discord.Interaction, keyword: str):
     kw = keyword.strip()
     if kw not in KEYWORDS:
-        return await interaction.response.send_message("That keyword isn't in the list.", ephemeral=True)
+        return await interaction.response.send_message("That keyword isn't in the list.")
     KEYWORDS.remove(kw)
-    await interaction.response.send_message(f"🗑️ Removed keyword: `{kw}`", ephemeral=True)
+    await interaction.response.send_message(f"🗑️ Removed keyword: `{kw}`")
 
 @tree.command(name="clear_keywords", description="Clear all keywords.")
 async def clear_keywords_cmd(interaction: discord.Interaction):
     KEYWORDS.clear()
-    await interaction.response.send_message("🧹 Cleared all keywords.", ephemeral=True)
+    await interaction.response.send_message("🧹 Cleared all keywords.")
 
 @tree.command(name="reset_seen", description="Clear seen items so listings can be posted again.")
 async def reset_seen_cmd(interaction: discord.Interaction):
     seen_items.clear()
-    await interaction.response.send_message("✅ Cleared seen items.", ephemeral=True)
+    await interaction.response.send_message("✅ Cleared seen items.")
 
 @tree.command(name="search_now", description="Run a one-off search now and post results (diagnostic).")
 async def search_now_cmd(interaction: discord.Interaction, keyword: str, max_price: int = 20, bypass_filter: bool = False):
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer()
 
     kw = keyword.strip()
     if not kw:
-        return await interaction.followup.send("Give me a keyword.", ephemeral=True)
+        return await interaction.followup.send("Give me a keyword.")
 
     if max_price < 1 or max_price > 500:
-        return await interaction.followup.send("max_price must be between 1 and 500.", ephemeral=True)
+        return await interaction.followup.send("max_price must be between 1 and 500.")
 
     items, meta = await asyncio.to_thread(fetch_items, kw, max_price, True, not bypass_filter)
     channel = await get_post_channel()
@@ -699,14 +698,12 @@ async def search_now_cmd(interaction: discord.Interaction, keyword: str, max_pri
 
     if not items:
         return await interaction.followup.send(
-            f"No results for `{kw}` up to £{max_price}.\n\n{diag}",
-            ephemeral=True
+            f"No results for `{kw}` up to £{max_price}.\n\n{diag}"
         )
 
     sent = await post_items(channel, kw, items, limit=8)
     await interaction.followup.send(
-        f"✅ Posted {sent} result(s) for `{kw}` (≤ £{max_price}).\n\n{diag}",
-        ephemeral=True
+        f"✅ Posted {sent} result(s) for `{kw}` (≤ £{max_price}).\n\n{diag}"
     )
 
 # =================================================
