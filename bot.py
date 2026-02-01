@@ -72,7 +72,7 @@ def get_headers():
 
 paused = False
 pause_until = None  # Timestamp for automatic resume
-adult_only = False   # default: False to avoid over-filtering (can enable with /adult_only)
+adult_only = True   # Smart filtering: blocks clearly kids items but allows mixed bundles
 seen_items = set()
 
 # ============ FILTERING (clothes-focused, not too strict) ============
@@ -153,13 +153,23 @@ def looks_like_clothes(title: str) -> bool:
 
     if adult_only:
         # Check for kids words - be more thorough
-        for word in KIDS_WORDS:
-            if word in t:
-                return False
+        # Count how many kids indicators are present
+        kids_count = sum(1 for word in KIDS_WORDS if word in t)
         
-        # Check for age patterns
+        # If multiple kids words, definitely reject
+        if kids_count >= 2:
+            return False
+        
+        # Check for age patterns (strong indicator of kids items)
         for pattern in KIDS_AGE_PATTERNS:
             if re.search(pattern, t):
+                return False
+        
+        # Single kids word + no bundle term = probably kids item
+        if kids_count == 1:
+            BUNDLE_TERMS_CHECK = ["bundle", "lot", "joblot", "job lot", "mixed", "wardrobe"]
+            has_bundle = any(term in t for term in BUNDLE_TERMS_CHECK)
+            if not has_bundle:
                 return False
         
         # Additional check: single digit ages (age 5, 5 years, etc.)
