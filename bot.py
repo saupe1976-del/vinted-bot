@@ -25,15 +25,16 @@ GUILD_ID = int(GUILD_ID_ENV) if GUILD_ID_ENV and GUILD_ID_ENV.isdigit() else Non
 KEYWORDS = [
     "clothes bundle",
     "clothing bundle",
-    "reseller bundle",
     "wardrobe bundle",
     "job lot clothes",
     "joblot clothes",
     "bundle items",
+    "clearout bundle",
+    "mixed bundle clothes",
 ]
 
 MAX_PRICE = 20
-SCAN_INTERVAL = 300  # seconds (10 minutes - less aggressive to avoid blocks)
+SCAN_INTERVAL = 600  # seconds (10 minutes - less aggressive to avoid blocks)
 
 # Profitability settings
 MIN_ITEMS_FOR_PROFIT = 5  # Minimum items in bundle to be considered profitable
@@ -732,4 +733,3 @@ async def search_now_cmd(interaction: discord.Interaction, keyword: str, max_pri
 
 if __name__ == "__main__":
     client.run(DISCORD_TOKEN)
-
