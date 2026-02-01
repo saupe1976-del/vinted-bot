@@ -3,6 +3,9 @@ import requests
 import asyncio
 import os
 import re
+import random
+import time
+import datetime
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
@@ -53,12 +56,11 @@ USER_AGENTS = [
 
 def get_headers():
     """Get realistic browser headers with rotating user agent"""
-    import random
     return {
         "User-Agent": random.choice(USER_AGENTS),
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
         "Accept-Language": "en-GB,en;q=0.5",
-        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Encoding": "gzip, deflate",
         "DNT": "1",
         "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",
@@ -70,7 +72,7 @@ def get_headers():
 
 paused = False
 pause_until = None  # Timestamp for automatic resume
-adult_only = True   # default: try to avoid kids bundles
+adult_only = False   # default: False to avoid over-filtering (can enable with /adult_only)
 seen_items = set()
 
 # ============ FILTERING (clothes-focused, not too strict) ============
@@ -127,10 +129,26 @@ KIDS_AGE_PATTERNS = [
 KIDS_WORDS = ["kids", "kid", "baby", "toddler", "girls", "boys", "children", "child", 
               "girl", "boy", "junior", "infant", "newborn", "teenage", "teen "]
 
+def contains_banned_term(t: str) -> bool:
+    """
+    Check for banned terms with word boundaries for short terms
+    to avoid blocking valid listings (e.g., 'ring' in 'wearing')
+    """
+    for bad in BANNED_TERMS:
+        if len(bad) <= 4:
+            # Use word boundary for short terms
+            if re.search(rf"\b{re.escape(bad)}\b", t):
+                return True
+        else:
+            # Substring match for longer terms
+            if bad in t:
+                return True
+    return False
+
 def looks_like_clothes(title: str) -> bool:
     t = (title or "").lower()
 
-    if any(bad in t for bad in BANNED_TERMS):
+    if contains_banned_term(t):
         return False
 
     if adult_only:
@@ -243,11 +261,13 @@ def calculate_profitability_score(title: str, price: float) -> dict:
         price_per_item = price / items_count
         indicators.append(f"£{price_per_item:.2f} per item")
     
-    # Check for high-value keywords
+    # Check for high-value keywords - focus on actual resale brands
     HIGH_VALUE_TERMS = [
-        "branded", "designer", "next", "zara", "h&m", "primark",
-        "new with tags", "bnwt", "nwt", "unworn", "new",
-        "reseller", "resale"
+        "branded", "designer", "reseller", "resale",
+        "nike", "adidas", "north face", "northface", "carhartt",
+        "patagonia", "ralph lauren", "tommy hilfiger", "lacoste",
+        "champion", "dickies", "levi", "levis", "diesel",
+        "new with tags", "bnwt", "nwt", "unworn", "new"
     ]
     
     for term in HIGH_VALUE_TERMS:
@@ -297,9 +317,6 @@ def fetch_items(query: str, price_to: int, ignore_seen: bool = False, apply_filt
     Returns (items, meta)
     meta includes: url, status, page_items, passed, error
     """
-    import random
-    import time
-    
     # Add random delay to appear more human (1-3 seconds)
     time.sleep(random.uniform(1, 3))
     
@@ -516,7 +533,6 @@ async def scan_loop():
     while not client.is_closed():
         # Check if pause timer has expired
         if pause_until:
-            import datetime
             now = datetime.datetime.now()
             if now >= pause_until:
                 paused = False
@@ -568,8 +584,6 @@ async def pause_cmd(interaction: discord.Interaction):
 
 @tree.command(name="pause_for", description="Pause scanner for a specific number of hours.")
 async def pause_for_cmd(interaction: discord.Interaction, hours: float):
-    import datetime
-    
     if hours <= 0 or hours > 168:  # Max 1 week
         return await interaction.response.send_message("Please choose between 0.1 and 168 hours (1 week).")
     
@@ -600,8 +614,6 @@ async def adult_only_cmd(interaction: discord.Interaction, enabled: bool):
 
 @tree.command(name="status", description="Show current bot settings.")
 async def status_cmd(interaction: discord.Interaction):
-    import datetime
-    
     status_text = f"Paused: **{paused}**\n"
     
     if pause_until:
